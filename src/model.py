@@ -15,6 +15,8 @@ from pydantic import BaseModel, Field
 from typing import Optional
 import psycopg2
 from psycopg2.extras import DictCursor
+import pickle
+import pandas as pd
 
 
 load_dotenv(find_dotenv())
@@ -130,3 +132,18 @@ def classifier_and_suppliers(input: str):
         print(supplier)
     return response, suppliers
 
+def best_offer(inquiry_id:int):
+    model_path = os.path.join('models', 'acceptance_predictor.pkl')
+    with open(model_path, 'rb') as f:
+        dtc = pickle.load(f)
+    df_supplier_quotes = pd.read_csv('data/csv/supplier_quotes.csv')
+    sel_quotes = df_supplier_quotes[df_supplier_quotes['inquiry_id']==inquiry_id].copy()
+    features = ["cost_average", "cost_price", "number_days", "distance", "quote_performance", "supplier_performance"]
+    sel_quotes['accept_probability'] = dtc.predict_proba(sel_quotes[features])[:,1].round(2)
+    best_quote = sel_quotes.sort_values(['accept_probability','cost_average','number_days','distance'],ascending=[False,True,True,True]).iloc[0,:]
+    best_quote
+    print(f'''
+        The best offer of inquiry {inquiry_id} is the one by supplier {best_quote['supplier_id']}, with a normalized cost of {best_quote['cost_average']}.
+        They can deliver the product in {best_quote['number_days']} days and the acceptance probability of the quote by the customer is
+        {best_quote['accept_probability']*100} %.
+        ''')
