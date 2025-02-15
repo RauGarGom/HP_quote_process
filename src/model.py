@@ -1,15 +1,7 @@
-import os, getpass
+import os
+import numpy as np
 from dotenv import load_dotenv, find_dotenv
-from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langgraph.graph import MessagesState
-from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.graph import START, StateGraph, END
-from langgraph.prebuilt import tools_condition
-from langgraph.prebuilt import ToolNode
-from IPython.display import Image, display
-from langchain_core.messages import trim_messages
-from langchain.output_parsers import PydanticOutputParser, PandasDataFrameOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -86,6 +78,10 @@ def db_insert_values(inquiry):
     conn.commit()
     conn.close()
 
+#####################
+#Main functions
+#####################
+
 
 def inquiry_classifier(input: str) -> inquiry:
     tagging_prompt = ChatPromptTemplate.from_template('''Extract the desired information from the text {input} and return it in a valid Pydantic object. If any information is not provided, return None.''')
@@ -95,6 +91,38 @@ def inquiry_classifier(input: str) -> inquiry:
     db_insert_values(response)
     return response
 
+def classifier_and_suppliers(input: str):
+    response = inquiry_classifier(input)
+    print(f"This is the information gathered: {response}")
+    print("="*50)
+    suppliers, ids = get_suppliers(response['product'])
+    print(f"The inquiry will be sent to the following suppliers:")
+    for supplier in suppliers:
+        print(supplier)
+    return response, suppliers
+
+def best_offer(inquiry_id:int):
+    model_path = os.path.join('models', 'acceptance_predictor.pkl')
+    with open(model_path, 'rb') as f:
+        dtc = pickle.load(f)
+    df_supplier_quotes = pd.read_csv('data/csv/supplier_quotes.csv')
+    sel_quotes = df_supplier_quotes[df_supplier_quotes['inquiry_id']==inquiry_id].copy()
+    features = ["cost_average", "cost_price", "number_days", "distance", "quote_performance", "supplier_performance"]
+    sel_quotes['accept_probability'] = dtc.predict_proba(sel_quotes[features])[:,1].round(2)
+    best_quote = sel_quotes.sort_values(['accept_probability','cost_average','number_days','distance'],ascending=[False,True,True,True]).iloc[0,:]
+    answer = (f'''The best offer of inquiry {inquiry_id} is the one by supplier {best_quote['supplier_id']}, with a normalized cost of {best_quote['cost_average']}. They can deliver the product in {best_quote['number_days']} days and the acceptance probability of the quote by the customer is {best_quote['accept_probability']*100} %.''')
+    return answer
+
+def quote_acceptance(cost_average, cost_price, number_days, distance, quote_performance, supplier_performance):
+    model_path = os.path.join('models', 'acceptance_predictor.pkl')
+    with open(model_path, 'rb') as f:
+        dtc = pickle.load(f)
+    pred = dtc.predict_proba(np.array([[cost_average, cost_price, number_days, distance, quote_performance, supplier_performance]]))
+    return pred[0][1]
+
+#####################
+#Auxiliary functions
+#####################
 
 def get_suppliers(product_name):
     conn, cursor = db_connect()
@@ -122,28 +150,3 @@ def get_suppliers(product_name):
     conn.close()
     return supplier_info, supplier_ids_tuple
 
-def classifier_and_suppliers(input: str):
-    response = inquiry_classifier(input)
-    print(f"This is the information gathered: {response}")
-    print("="*50)
-    suppliers, ids = get_suppliers(response['product'])
-    print(f"The inquiry will be sent to the following suppliers:")
-    for supplier in suppliers:
-        print(supplier)
-    return response, suppliers
-
-def best_offer(inquiry_id:int):
-    model_path = os.path.join('models', 'acceptance_predictor.pkl')
-    with open(model_path, 'rb') as f:
-        dtc = pickle.load(f)
-    df_supplier_quotes = pd.read_csv('data/csv/supplier_quotes.csv')
-    sel_quotes = df_supplier_quotes[df_supplier_quotes['inquiry_id']==inquiry_id].copy()
-    features = ["cost_average", "cost_price", "number_days", "distance", "quote_performance", "supplier_performance"]
-    sel_quotes['accept_probability'] = dtc.predict_proba(sel_quotes[features])[:,1].round(2)
-    best_quote = sel_quotes.sort_values(['accept_probability','cost_average','number_days','distance'],ascending=[False,True,True,True]).iloc[0,:]
-    best_quote
-    print(f'''
-        The best offer of inquiry {inquiry_id} is the one by supplier {best_quote['supplier_id']}, with a normalized cost of {best_quote['cost_average']}.
-        They can deliver the product in {best_quote['number_days']} days and the acceptance probability of the quote by the customer is
-        {best_quote['accept_probability']*100} %.
-        ''')
