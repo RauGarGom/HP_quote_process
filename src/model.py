@@ -86,7 +86,7 @@ def db_insert_values(inquiry):
 def inquiry_classifier(input: str) -> inquiry:
     tagging_prompt = ChatPromptTemplate.from_template('''Extract the desired information from the text {input} and return it in a valid Pydantic object. If any information is not provided, return None.''')
     prompt = tagging_prompt.invoke({"input":input})
-    model = ChatGoogleGenerativeAI(model="gemini-1.5-flash",temperature=0).with_structured_output(inquiry)
+    model = ChatGoogleGenerativeAI(model="gemini-2.0-flash",temperature=0).with_structured_output(inquiry)
     response = model.invoke(prompt).model_dump()
     db_insert_values(response)
     return response
